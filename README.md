@@ -42,9 +42,12 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
    GRANT replication_group TO admin;
    GRANT replication_group TO debezium_source;
    GRANT CREATE ON DATABASE source TO debezium_source;
+   ```
+5. Chuyển owner của các table cho user:
+   ```
    ALTER TABLE account OWNER TO replication_group;
    ```
-5. Tạo source connector trên debezium:
+6. Tạo source connector trên debezium:
    ```
    curl --location 'http://localhost:8083/connectors' \
    --header 'Content-Type: application/json' \
@@ -66,10 +69,13 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
      "database.history.kafka.bootstrap.servers": "kafka:9092",
      "database.history.kafka.topic": "schema-changes.source_db",
      "topic.prefix": "source-changes"
-     }
-    }'
+    }
+   }'
    ```
-6. Tạo user cho debezium sink connector trên database cần đồng bộ với các quyền cần thiết để thực hiện thay đổi:
+   - Với mỗi table, debezium sẽ tạo một topic trên kafka để truyền message về sự thay đổi của bảng đó. Tên topic có dạng `<topic.prefix>.<schema>.<database_name>`.
+   - Khi lần đầu kết nối với Postgre, debezium sẽ tạo một snapshot của tất cả các database và gửi tất cả các record hiện có lên kafka.
+   - Vì topic chỉ được tạo khi message đầu tiên được debezium gửi lên kafka, vậy nên nếu table ko có record nào, ta phải tạo một test record để topic được khỏi tạo trên kafka. VD: `INSERT INTO account(username,password) VALUES('testAccount','123456');`
+7. Tạo user cho debezium sink connector trên database cần đồng bộ với các quyền cần thiết để thực hiện thay đổi:
    ```
    CREATE USER debezium_sink WITH PASSWORD '123456';
    GRANT CONNECT ON DATABASE target TO debezium_sink;
@@ -82,7 +88,29 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
 
    ALTER TABLE account OWNER TO owner_group; 
    ```
-7. Tạo sink connector trên debezium
+   - Nếu muốn debezium tự động tạo table nếu chưa tồn tại, ta cần cấp quyển `CREATE` trên schema tương ứng
+   ``` 
+   GRANT CREATE ON SCHEMA public TO debezium_sink;
+   ```
+   - Debezium sẽ tạo table dựa trên data nhận được trong message nên schema có thể sẽ hơi khác với schema trong database gốc. VD:       
+   Table gốc:
+   ``` 
+   CREATE TABLE account(
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    password VARCHAR(50) NOT NULL
+   );
+   ```
+   Table được tạo bởi debezium:
+   ``` 
+   CREATE TABLE account (
+    id integer DEFAULT 0 NOT NULL, 
+    username text NOT NULL, 
+    password text NOT NULL, 
+    PRIMARY KEY(id)
+   );
+   ```
+8. Tạo sink connector trên debezium
    ```
    curl --location 'http://localhost:8083/connectors' \
    --header 'Content-Type: application/json' \
@@ -98,9 +126,29 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
      "delete.enabled": "true",
      "schema.evolution": "basic",
      "primary.key.mode": "record_key",
-     "topics": "source-changes.public.account",
-     "table.name.format": "account"
-     }
-    }'
+     "topics.regex": "source-changes\\.public\\..*",
+     "transforms": "RenameTopic",
+     "transforms.RenameTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
+     "transforms.RenameTopic.regex": "source-changes\\.public\\.(.*)",
+     "transforms.RenameTopic.replacement": "$1",
+     "table.name.format": "${topic}"
+    }
+   }'
    ```
-   
+9. Check xem source và sink connector đã hoạt động bình thướng chưa bằng cách gửi request đến
+   ``` 
+   curl --location 'http://localhost:8083/connectors/postgres-source-connector/status' --data ''
+   curl --location 'http://localhost:8083/connectors/postgres-sink-connector/status' --data ''
+   ```
+## Thêm table để đồng bộ
+
+1. Tạo table trên database gốc và database cần đồng bộ (nếu không cấp quyền cho debezium tự động tạo table) và chuyển quyền owner sang cho debezium user
+2. Gửi request để khởi động lại source connector
+   ```
+   curl --location --request POST 'http://localhost:8083/connectors/postgres-source-connector/tasks/0/restart' 
+   ```
+3. Insert test data cho table để debezium tạo topic trên kafka
+4. Gửi request để khởi động lại sink connector
+   ```
+   curl --location --request POST 'http://localhost:8083/connectors/postgres-sink-connector/tasks/0/restart' 
+   ```

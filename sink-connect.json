@@ -10,7 +10,11 @@
     "delete.enabled": "true",
     "schema.evolution": "basic",
     "primary.key.mode": "record_key",
-    "topics": "source-changes.public.account",
-    "table.name.format": "account"
+    "topics.regex": "source-changes\\.public\\..*",
+    "transforms": "RenameTopic",
+    "transforms.RenameTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.RenameTopic.regex": "source-changes\\.public\\.(.*)",
+    "transforms.RenameTopic.replacement": "$1",
+    "table.name.format": "${topic}"
   }
 }
