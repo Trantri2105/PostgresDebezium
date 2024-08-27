@@ -20,7 +20,7 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
 
 1. Khi datababe gốc có sự thay đổi về dữ liệu, debezium sẽ sử dụng các source connector để phát hiện những thay đổi đã xảy ra với từng record.
 2. Debezium sẽ chuyển những thay đổi này sang message và gửi lên kafka.
-3. Khi message đã được gửi lên kafka, ta có thể viết chương trình hoặc dùng các sink connector của debezium để đọc message và thực hiện những thay đổi này lên database.
+3. Khi message đã được gửi lên kafka, sink connector sẽ consume message và thực hiện những thay đổi này lên database.
 
 ## Setup
 
@@ -65,23 +65,24 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
      "slot.name": "debezium_slot",
      "publication.autocreate.mode": "filtered",
      "publication.name": "debezium_publication",
-     "table.include.list": "public.*",
+     "table.include.list": "public.account",
      "database.history.kafka.bootstrap.servers": "kafka:9092",
      "database.history.kafka.topic": "schema-changes.source_db",
      "topic.prefix": "source-changes"
     }
    }'
    ```
-   - Với mỗi table, debezium sẽ tạo một topic trên kafka để truyền message về sự thay đổi của bảng đó. Tên topic có dạng `<topic.prefix>.<schema>.<database_name>`.
-   - Khi lần đầu kết nối với Postgre, debezium sẽ tạo một snapshot của tất cả các database và gửi tất cả các record hiện có lên kafka.
-   - Vì topic chỉ được tạo khi message đầu tiên được debezium gửi lên kafka, vậy nên nếu table ko có record nào, ta phải tạo một test record để topic được khỏi tạo trên kafka. VD: `INSERT INTO account(username,password) VALUES('testAccount','123456');`
-7. Tạo user cho debezium sink connector trên database cần đồng bộ với các quyền cần thiết để thực hiện thay đổi:
+   - Với mỗi table, debezium sẽ tạo một topic trên kafka để truyền message về sự thay đổi của bảng đó với format `<topic.prefix>.<schema>.<database_name>`.
+   - Đọc thêm các property để config source connector tại [source connector properties](https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-connector-properties)
+7. Tạo user cho debezium sink connector trên database cần đồng bộ với các quyền cần thiết để thực hiện thay đổi
    ```
    CREATE USER debezium_sink WITH PASSWORD '123456';
    GRANT CONNECT ON DATABASE target TO debezium_sink;
    GRANT USAGE ON SCHEMA public TO debezium_sink;
    GRANT INSERT, UPDATE, DELETE, SELECT ON ALL TABLES IN SCHEMA public TO debezium_sink;
-
+   ```
+   - Nếu muốn debezium có thể áp dụng thay đổi dạng `alter table` lên một table, debezium cần sở hữu table đó
+   ```
    CREATE ROLE owner_group;
    GRANT owner_group TO admin;
    GRANT owner_group TO debezium_sink;
@@ -92,24 +93,25 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
    ``` 
    GRANT CREATE ON SCHEMA public TO debezium_sink;
    ```
-   - Debezium sẽ tạo table dựa trên data nhận được trong message nên schema có thể sẽ hơi khác với schema trong database gốc. VD:       
-   Table gốc:
-   ``` 
-   CREATE TABLE account(
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    password VARCHAR(50) NOT NULL
-   );
-   ```
-   Table được tạo bởi debezium:
-   ``` 
-   CREATE TABLE account (
-    id integer DEFAULT 0 NOT NULL, 
-    username text NOT NULL, 
-    password text NOT NULL, 
-    PRIMARY KEY(id)
-   );
-   ```
+   - Debezium sẽ tạo table dựa trên data nhận được trong message nên schema có thể sẽ khác với schema trong database gốc.
+   
+     Table gốc:
+     ``` 
+     CREATE TABLE account(
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(50) NOT NULL,
+      password VARCHAR(50) NOT NULL
+     );
+     ```
+     Table được tạo bởi debezium:
+     ``` 
+     CREATE TABLE account (
+      id integer DEFAULT 0 NOT NULL, 
+      username text NOT NULL, 
+      password text NOT NULL, 
+      PRIMARY KEY(id)
+     );
+     ```
 8. Tạo sink connector trên debezium
    ```
    curl --location 'http://localhost:8083/connectors' \
@@ -126,18 +128,39 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
      "delete.enabled": "true",
      "schema.evolution": "basic",
      "primary.key.mode": "record_key",
-     "topics.regex": "source-changes\\.public\\..*",
-     "transforms": "RenameTopic",
-     "transforms.RenameTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
-     "transforms.RenameTopic.regex": "source-changes\\.public\\.(.*)",
-     "transforms.RenameTopic.replacement": "$1",
-     "table.name.format": "${topic}"
+     "topics": "source-changes.public.account",
+     "table.name.format": "account"
     }
    }'
    ```
-   - Tasks.max: số tác vụ chạy song song. Mỗi một partition sẽ được gán cho đúng 1 task. Nếu số task max > số partition thì số task dùng = số partition
-9. Check xem source và sink connector đã hoạt động bình thướng chưa bằng cách gửi request đến
+   - `tasks.max`: số tác vụ chạy song song. Mỗi một partition sẽ được gán cho đúng 1 task. Nếu số task max > số partition thì số task dùng = số partition. Mặc định thì debezium sẽ tạo một partition cho một topic
+   - Đọc thêm các property để config sink connector tại [sink connector properties](https://debezium.io/documentation/reference/stable/connectors/jdbc.html#jdbc-connector-properties)
+9. Kiểm tra trạng thái của source và sink connector
    ``` 
    curl --location 'http://localhost:8083/connectors/postgres-source-connector/status' --data ''
    curl --location 'http://localhost:8083/connectors/postgres-sink-connector/status' --data ''
+   ```
+
+## Trường hợp database cần được đồng bộ bị sập
+
+1. Khi database hoạt động trở lại, kiểm tra tình trạng của các task trong sink connector
+   ``` 
+   curl --location 'http://localhost:8083/connectors/postgre-sink-connector/status' --data ''
+   ```
+2. Restart lần lượt lại các task failed
+   ```
+   curl --location --request POST 'http://localhost:8083/connectors/postgre-sink-connector/tasks/0/restart'
+   ```
+
+## Trường hợp database mất dữ liệu và cần được đồng bộ lại từ đầu
+
+1. Tạo sink connector mới
+2. Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
+   - Xem các connector hiện có
+   ``` 
+   curl --location 'http://localhost:8083/connectors'
+   ```
+   - Xóa connector
+   ```
+   curl --location --request DELETE 'http://localhost:8083/connectors/postgre-sink-connector' 
    ```
