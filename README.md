@@ -135,20 +135,9 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
     }
    }'
    ```
+   - Tasks.max: số tác vụ chạy song song. Mỗi một partition sẽ được gán cho đúng 1 task. Nếu số task max > số partition thì số task dùng = số partition
 9. Check xem source và sink connector đã hoạt động bình thướng chưa bằng cách gửi request đến
    ``` 
    curl --location 'http://localhost:8083/connectors/postgres-source-connector/status' --data ''
    curl --location 'http://localhost:8083/connectors/postgres-sink-connector/status' --data ''
-   ```
-## Thêm table để đồng bộ
-
-1. Tạo table trên database gốc và database cần đồng bộ (nếu không cấp quyền cho debezium tự động tạo table) và chuyển quyền owner sang cho debezium user
-2. Gửi request để khởi động lại source connector
-   ```
-   curl --location --request POST 'http://localhost:8083/connectors/postgres-source-connector/tasks/0/restart' 
-   ```
-3. Insert test data cho table để debezium tạo topic trên kafka
-4. Gửi request để khởi động lại sink connector
-   ```
-   curl --location --request POST 'http://localhost:8083/connectors/postgres-sink-connector/tasks/0/restart' 
    ```
