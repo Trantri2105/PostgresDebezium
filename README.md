@@ -152,7 +152,7 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
    ```
    curl --location --request POST 'http://localhost:8083/connectors/postgre-sink-connector/tasks/0/restart'
    ```
-- Trong trường hợp thời gian database gặp sự cố > thời gian message được lưu, ta cần phải tạo mới source và sinh connector, đồng bộ lại từ đầu.Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
+- Trong trường hợp thời gian database gặp sự cố > thời gian message được lưu, ta cần phải tạo mới source và sink connector, đồng bộ lại từ đầu.Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
    - Xem các connector hiện có
    ``` 
    curl --location 'http://localhost:8083/connectors'
@@ -175,3 +175,4 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
       ```
       curl --location --request DELETE 'http://localhost:8083/connectors/postgre-sink-connector' 
       ```
+- Trong trường hợp thời gian từ khi bắt đầu tạo source connector đến khi database mất dữ liệu > thời gian message được lưu ta cần phải tạo mới source và sink connector, đồng bộ lại từ đầu
