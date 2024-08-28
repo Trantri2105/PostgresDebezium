@@ -143,19 +143,16 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
 
 ## Trường hợp database cần được đồng bộ bị sập
 
-1. Khi database hoạt động trở lại, kiểm tra tình trạng của các task trong sink connector
+- Vì message chỉ được lưu trong kafka trong một khoảng thời gian nhất định nên nếu trong trường hợp thời gian database gặp sự cố < thời gian message được lưu, ta chỉ cần restart lại sink connector để tiếp tục process các message chưa consume:
+   1. Khi database hoạt động trở lại, kiểm tra tình trạng của các task trong sink connector
    ``` 
    curl --location 'http://localhost:8083/connectors/postgre-sink-connector/status' --data ''
    ```
-2. Restart lần lượt lại các task failed
+   2. Restart lần lượt lại các task failed
    ```
    curl --location --request POST 'http://localhost:8083/connectors/postgre-sink-connector/tasks/0/restart'
    ```
-
-## Trường hợp database mất dữ liệu và cần được đồng bộ lại từ đầu
-
-1. Tạo sink connector mới
-2. Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
+- Trong trường hợp thời gian database gặp sự cố > thời gian message được lưu, ta cần phải tạo mới source và sinh connector, đồng bộ lại từ đầu.Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
    - Xem các connector hiện có
    ``` 
    curl --location 'http://localhost:8083/connectors'
@@ -164,3 +161,17 @@ Project sử dụng debezium và kafka để đồng bộ hóa dữ liệu giữ
    ```
    curl --location --request DELETE 'http://localhost:8083/connectors/postgre-sink-connector' 
    ```
+
+
+## Trường hợp database mất dữ liệu và cần được đồng bộ lại từ đầu
+- Vì message chỉ được lưu trong kafka trong một khoảng thời gian nhất định nên nếu trong trường hợp thời gian từ khi bắt đầu tạo source connector đến khi database mất dữ liệu < thời gian message được lưu, ta chỉ cần tạo lại sink connector:
+   1. Tạo sink connector mới
+   2. Vì debezium sẽ tạo thread cho mỗi connector nên để tối ưu tài nguyên, ta có thể xóa đi các connector cũ
+      - Xem các connector hiện có
+      ``` 
+      curl --location 'http://localhost:8083/connectors'
+      ```
+      - Xóa connector
+      ```
+      curl --location --request DELETE 'http://localhost:8083/connectors/postgre-sink-connector' 
+      ```
